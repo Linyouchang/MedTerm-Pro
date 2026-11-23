@@ -5340,6 +5340,8 @@
       getAuth,
       GoogleAuthProvider,
       signInWithPopup,
+      signInWithRedirect,
+      getRedirectResult,
       signOut,
       onAuthStateChanged
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
@@ -5371,6 +5373,7 @@
 
     let currentUser = null;
     let syncTimer = null;
+    let isSigningIn = false;
 
     function updateAuthUI(user) {
       const container = document.getElementById('header-auth-area');
@@ -5391,11 +5394,11 @@
         `;
       } else {
         container.innerHTML = `
-          <button onclick="signInWithGoogle()"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
+          <button id="btn-google-signin" onclick="signInWithGoogle()" ${isSigningIn ? 'disabled' : ''}
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-xs font-bold transition cursor-pointer"
             title="使用 Google 帳號登入並同步學習進度至雲端">
             <i data-lucide="cloud" class="w-3.5 h-3.5"></i>
-            <span class="hidden sm:inline">雲端登入</span>
+            <span class="hidden sm:inline">${isSigningIn ? '登入中...' : '雲端登入'}</span>
           </button>
         `;
       }
@@ -5430,19 +5433,51 @@
     };
 
     window.signInWithGoogle = async () => {
+      if (isSigningIn) return;
+      isSigningIn = true;
+      updateAuthUI(null);
+
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       try {
-        const provider = new GoogleAuthProvider();
         const result = await signInWithPopup(auth, provider);
         if (typeof window.showToast === 'function') {
           window.showToast(`☁️ 歡迎回來，${result.user.displayName || '同學'}！已啟用雲端同步`, 'success');
         }
       } catch (err) {
-        console.error('[Firebase] Google 登入失敗:', err);
-        if (typeof window.showToast === 'function') {
-          window.showToast(`登入失敗：${err.code || err.message}`, 'warning');
+        if (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment') {
+          try {
+            await signInWithRedirect(auth, provider);
+            return;
+          } catch (redirectErr) {
+            console.error('[Firebase] Redirect 登入失敗:', redirectErr);
+          }
+        } else if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
+          if (typeof window.showToast === 'function') {
+            window.showToast('已關閉登入視窗，若需登入請再點一次', 'info');
+          }
+        } else {
+          console.error('[Firebase] Google 登入失敗:', err);
+          if (typeof window.showToast === 'function') {
+            window.showToast(`登入失敗：${err.code || err.message}`, 'warning');
+          }
         }
+      } finally {
+        isSigningIn = false;
+        updateAuthUI(currentUser);
       }
     };
+
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user && typeof window.showToast === 'function') {
+          window.showToast(`☁️ 歡迎回來，${result.user.displayName || '同學'}！已啟用雲端同步`, 'success');
+        }
+      })
+      .catch((err) => {
+        console.error('[Firebase] Redirect 結果讀取失敗:', err);
+      });
 
     window.signOutFirebase = async () => {
       try {
